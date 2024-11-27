@@ -72,6 +72,9 @@ private:
 	substrait::Rel *TransformCreateTable(LogicalOperator &dop);
 	substrait::Rel *TransformInsertTable(LogicalOperator &dop);
 	substrait::Rel *TransformDeleteTable(LogicalOperator &dop);
+        substrait::Rel *TransformUpdateTable(LogicalOperator &dop);
+        void UpdateColumnReferences(substrait::Expression * expression, const vector<ColumnIndex> vector);
+
 	static substrait::Rel *TransformDummyScan();
 	//! Methods to transform different LogicalGet Types (e.g., Table, Parquet)
 	//! To Substrait;

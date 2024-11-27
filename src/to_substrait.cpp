@@ -1515,7 +1515,6 @@ substrait::Rel *DuckDBToSubstrait::TransformInsertTable(LogicalOperator &dop) {
 substrait::Rel *DuckDBToSubstrait::TransformDeleteTable(LogicalOperator &dop) {
 	auto rel = new substrait::Rel();
 	auto &logical_delete = dop.Cast<LogicalDelete>();
-	auto &table = logical_delete.table;
 	if (logical_delete.children.size() != 1) {
 		throw InternalException("Delete table expected one child, found " + to_string(logical_delete.children.size()));
 	}
@@ -1523,10 +1522,6 @@ substrait::Rel *DuckDBToSubstrait::TransformDeleteTable(LogicalOperator &dop) {
 	auto writeRel = rel->mutable_write();
 	writeRel->set_op(substrait::WriteRel::WriteOp::WriteRel_WriteOp_WRITE_OP_DELETE);
 	writeRel->set_output(substrait::WriteRel::OUTPUT_MODE_NO_OUTPUT);
-
-	auto named_table = writeRel->mutable_named_table();
-	named_table->add_names(table.schema.name);
-	named_table->add_names(table.name);
 
 	SetNamedTable(logical_delete.table, writeRel);
 	auto schema = new substrait::NamedStruct();
@@ -1536,6 +1531,175 @@ substrait::Rel *DuckDBToSubstrait::TransformDeleteTable(LogicalOperator &dop) {
 	substrait::Rel *input = TransformOp(*logical_delete.children[0]);
 	writeRel->set_allocated_input(input);
 	return rel;
+}
+
+const vector<ColumnIndex> & GetColumnIds(const LogicalProjection & dproj) {
+	if (dproj.children.size() != 1) {
+		throw InternalException("Update table projection expected 1 child, found " + to_string(dproj.children.size()));
+	}
+
+	if (dproj.children[0]->type == LogicalOperatorType::LOGICAL_GET) {
+		return dproj.children[0]->Cast<LogicalGet>().GetColumnIds();
+	}
+	// if (dproj.children[0]->type == LogicalOperatorType::LOGICAL_PROJECTION) {
+	// 	int columnCount = dproj.expressions.size();
+	// 	vector<ColumnIndex> columnIds;
+	// 	auto &inner_proj = dproj.children[0]->Cast<LogicalProjection>();
+	//
+	// }
+        static const vector<ColumnIndex> empty;
+        return empty;
+}
+
+substrait::Rel *DuckDBToSubstrait::TransformUpdateTable(LogicalOperator &dop) {
+	auto rel = new substrait::Rel();
+	auto &logical_update = dop.Cast<LogicalUpdate>();
+	auto &table = logical_update.table;
+	if (logical_update.children.size() != 1) {
+		throw InternalException("Delete table expected one child, found " + to_string(logical_update.children.size()));
+	}
+
+	auto update_rel = rel->mutable_update();
+
+	auto named_table = update_rel->mutable_named_table();
+	named_table->add_names(table.schema.name);
+	named_table->add_names(table.name);
+
+	auto schema = new substrait::NamedStruct();
+	SetTableSchema(logical_update.table, schema);
+	update_rel->set_allocated_table_schema(schema);
+
+	if (logical_update.children.size() != 1) {
+		throw InternalException("Update table expected one child, found " + to_string(logical_update.children.size()));
+	}
+	if (logical_update.children[0]->type != LogicalOperatorType::LOGICAL_PROJECTION) {
+		throw InternalException("Update table expected projection child, found " +
+		                        LogicalOperatorToString(logical_update.children[0]->type));
+	}
+
+	auto &dproj = dop.children[0]->Cast<LogicalProjection>();
+	if (dproj.expressions.size() < logical_update.columns.size()) {
+		throw InternalException("Update table expected %d expressions, found %d", logical_update.expressions.size(),
+		                        dproj.expressions.size());
+	}
+	if (dproj.children.size() != 1) {
+		throw InternalException("Update table projection expected 1 child, found " + to_string(dproj.children.size()));
+	}
+	if (dproj.children[0]->type != LogicalOperatorType::LOGICAL_GET &&
+		dproj.children[0]->type != LogicalOperatorType::LOGICAL_FILTER) {
+		throw InternalException("Update table projection expected get as child, found " +
+		                        LogicalOperatorToString(dproj.children[0]->type));
+	}
+
+	// fix column references in the transformations using the column ids
+	auto &columnIds = GetColumnIds(dproj);
+	// auto &columnIds = dproj.children[0]->Cast<LogicalGet>().GetColumnIds();
+
+	substrait::Rel *input = TransformOp(*logical_update.children[0]);
+	auto &project_rel = input->project();
+	for (int i = 0; i < logical_update.columns.size(); i++) {
+		auto transformation = update_rel->add_transformations();
+		auto mutable_expression = transformation->mutable_transformation();
+		mutable_expression->CopyFrom(project_rel.expressions(i));
+		UpdateColumnReferences(mutable_expression, columnIds);
+		transformation->set_column_target(logical_update.columns[i].index);
+	}
+
+	switch (project_rel.input().rel_type_case()) {
+	case substrait::Rel::RelTypeCase::kRead: {
+		auto &read_rel = project_rel.input().read();
+		if (read_rel.has_filter()) {
+			auto condition = new substrait::Expression(read_rel.filter());
+			update_rel->set_allocated_condition(condition);
+		}
+		break;
+        }
+	case substrait::Rel::RelTypeCase::kProject: {
+		auto &inner_project_rel = project_rel.input().project();
+		if (inner_project_rel.input().rel_type_case() != substrait::Rel::RelTypeCase::kFilter) {
+			throw InternalException("Unsupported input type " + to_string(inner_project_rel.input().rel_type_case()));
+		}
+		if (inner_project_rel.input().has_filter() && inner_project_rel.input().filter().has_condition()) {
+			auto condition = new substrait::Expression(inner_project_rel.input().filter().condition());
+
+			update_rel->set_allocated_condition(condition);
+		}
+		break;
+	}
+	default:
+		throw InternalException("Unsupported input type " + to_string(project_rel.input().rel_type_case()));
+	}
+	return rel;
+}
+
+void DuckDBToSubstrait::UpdateColumnReferences(substrait::Expression * expr, const vector<ColumnIndex> columnIds) {
+	if (columnIds.empty()) {
+		return;
+	}
+	switch (expr->rex_type_case()) {
+	case substrait::Expression::RexTypeCase::kLiteral:
+		return;
+	case substrait::Expression::RexTypeCase::kSelection: {
+		auto &fieldRef = expr->selection();
+		if (fieldRef.has_direct_reference() && fieldRef.direct_reference().has_struct_field()) {
+			auto inputColumnIdx = fieldRef.direct_reference().struct_field().field();
+			auto newColumnId = columnIds[inputColumnIdx].GetPrimaryIndex();
+			expr->mutable_selection()->mutable_direct_reference()->mutable_struct_field()->set_field(newColumnId);
+		}
+		return;
+	}
+	case substrait::Expression::RexTypeCase::kScalarFunction: {
+		auto mutable_function = expr->mutable_scalar_function();
+		for (int i = 0; i < mutable_function->arguments_size(); i++) {
+			if (mutable_function->arguments(i).has_value()) {
+				auto mutable_arg = mutable_function->mutable_arguments(i)->mutable_value();
+				UpdateColumnReferences(mutable_arg, columnIds);
+			}
+		}
+		return;
+	}
+	case substrait::Expression::RexTypeCase::kIfThen: {
+		if (expr->if_then().has_else_()) {
+			UpdateColumnReferences(expr->mutable_if_then()->mutable_else_(), columnIds);
+		}
+		for (int i = 0; i < expr->if_then().ifs_size(); i++) {
+			UpdateColumnReferences(expr->mutable_if_then()->mutable_ifs(i)->mutable_if_(), columnIds);
+			UpdateColumnReferences(expr->mutable_if_then()->mutable_ifs(i)->mutable_then(), columnIds);
+		}
+		return;
+	}
+	case substrait::Expression::RexTypeCase::kCast: {
+		auto mutable_cast = expr->mutable_cast();
+		if (mutable_cast->has_input()) {
+			UpdateColumnReferences(mutable_cast->mutable_input(), columnIds);
+		}
+		return;
+	}
+	case substrait::Expression::RexTypeCase::kSingularOrList:
+		return;
+	case substrait::Expression::RexTypeCase::kNested: {
+		auto nested = expr->mutable_nested();
+		if (nested->has_struct_()) {
+			for (int i = 0; i < nested->struct_().fields_size(); i++) {
+				UpdateColumnReferences(nested->mutable_struct_()->mutable_fields(i), columnIds);
+			}
+		} else if (nested->has_list()) {
+			for (int i = 0; i < nested->list().values_size(); i++) {
+				UpdateColumnReferences(nested->mutable_list()->mutable_values(i), columnIds);
+			}
+		} else if (nested->has_map()) {
+			for (int i = 0; i < nested->map().key_values_size(); i++) {
+				UpdateColumnReferences(nested->mutable_map()->mutable_key_values(i)->mutable_key(), columnIds);
+				UpdateColumnReferences(nested->mutable_map()->mutable_key_values(i)->mutable_value(), columnIds);
+			}
+		}
+		return;
+	}
+	case substrait::Expression::RexTypeCase::kSubquery:
+		return;
+	default:
+		throw InternalException("Unsupported expression type " + to_string(expr->rex_type_case()));
+	}
 }
 
 substrait::Rel *DuckDBToSubstrait::TransformOp(LogicalOperator &dop) {
@@ -1576,6 +1740,8 @@ substrait::Rel *DuckDBToSubstrait::TransformOp(LogicalOperator &dop) {
 		return TransformInsertTable(dop);
 	case LogicalOperatorType::LOGICAL_DELETE:
 		return TransformDeleteTable(dop);
+	case LogicalOperatorType::LOGICAL_UPDATE:
+		return TransformUpdateTable(dop);
 	default:
 		throw NotImplementedException(LogicalOperatorToString(dop.type));
 	}

@@ -22,13 +22,8 @@
 #include "duckdb/common/helper.hpp"
 
 #include "duckdb/main/relation.hpp"
-#include "duckdb/main/relation/create_table_relation.hpp"
-#include <duckdb/main/relation/delete_relation.hpp>
-#include "duckdb/main/relation/table_relation.hpp"
-#include "duckdb/main/relation/table_function_relation.hpp"
-#include "duckdb/main/relation/value_relation.hpp"
-#include "duckdb/main/relation/view_relation.hpp"
 #include "duckdb/main/relation/aggregate_relation.hpp"
+#include "duckdb/main/relation/create_table_relation.hpp"
 #include "duckdb/main/relation/cross_product_relation.hpp"
 #include "duckdb/main/relation/filter_relation.hpp"
 #include "duckdb/main/relation/join_relation.hpp"
@@ -36,6 +31,13 @@
 #include "duckdb/main/relation/order_relation.hpp"
 #include "duckdb/main/relation/projection_relation.hpp"
 #include "duckdb/main/relation/setop_relation.hpp"
+#include "duckdb/main/relation/table_function_relation.hpp"
+#include "duckdb/main/relation/table_relation.hpp"
+#include "duckdb/main/relation/value_relation.hpp"
+#include "duckdb/main/relation/view_relation.hpp"
+#include <duckdb/main/relation/delete_relation.hpp>
+
+#include <duckdb/main/relation/update_relation.hpp>
 
 namespace duckdb {
 const std::unordered_map<std::string, std::string> SubstraitToDuckDB::function_names_remap = {
@@ -753,6 +755,48 @@ shared_ptr<Relation> SubstraitToDuckDB::TransformWriteOp(const substrait::Rel &s
 	}
 }
 
+
+shared_ptr<Relation> SubstraitToDuckDB::TransformUpdateOp(const substrait::Rel &sop) {
+	auto &supdate = sop.update();
+	auto &nobj = supdate.named_table();
+	if (nobj.names_size() == 0) {
+		throw InvalidInputException("Named object must have at least one name");
+	}
+	auto table_idx = nobj.names_size() - 1;
+	auto table_name = nobj.names(table_idx);
+	string schema_name;
+	if (table_idx > 0) {
+		schema_name = nobj.names(0);
+	}
+
+	auto schema = supdate.table_schema();
+	unique_ptr<ParsedExpression> condition = nullptr;
+	if (supdate.has_condition()) {
+		condition = std::move(TransformExpr(supdate.condition()));
+	}
+	vector<unique_ptr<ParsedExpression>> transformations;
+	vector<string> columns;
+	for (int i = 0; i < supdate.transformations_size(); i++) {
+		auto &transformation = supdate.transformations(i);
+		auto column_target = transformation.column_target();
+		columns.push_back(schema.names(column_target));
+		transformations.emplace_back(TransformExpr(transformation.transformation()));
+	}
+
+	shared_ptr<TableRelation> table;
+	auto context_wrapper = make_shared_ptr<RelationContextWrapper>(context);
+        auto table_info = TableInfo(*context, DEFAULT_SCHEMA, table_name);
+	if (!table_info) {
+		throw CatalogException("Table '%s' does not exist!", table_name);
+	}
+	if (acquire_lock) {
+		table = make_shared_ptr<TableRelation>(context, std::move(table_info));
+	} else {
+		table = make_shared_ptr<TableRelation>(context_wrapper, std::move(table_info));
+	}
+	return make_shared_ptr<UpdateRelation>(table->context, std::move(condition), schema_name, table_name, columns, std::move(transformations));
+}
+
 shared_ptr<Relation> SubstraitToDuckDB::TransformOp(const substrait::Rel &sop,
                                                     const google::protobuf::RepeatedPtrField<std::string> *names) {
 	switch (sop.rel_type_case()) {
@@ -776,6 +820,8 @@ shared_ptr<Relation> SubstraitToDuckDB::TransformOp(const substrait::Rel &sop,
 		return TransformSetOp(sop, names);
 	case substrait::Rel::RelTypeCase::kWrite:
 		return TransformWriteOp(sop);
+	case substrait::Rel::RelTypeCase::kUpdate:
+		return TransformUpdateOp(sop);
 	default:
 		throw InternalException("Unsupported relation type " + to_string(sop.rel_type_case()));
 	}
@@ -835,7 +881,8 @@ shared_ptr<Relation> SubstraitToDuckDB::TransformRootOp(const substrait::RelRoot
 		}
 	}
 
-	if (sop.input().rel_type_case() == substrait::Rel::RelTypeCase::kWrite) {
+	switch (sop.input().rel_type_case()) {
+	case substrait::Rel::RelTypeCase::kWrite: {
 		auto write = sop.input().write();
 		switch (write.op()) {
 		case substrait::WriteRel::WriteOp::WriteRel_WriteOp_WRITE_OP_CTAS: {
@@ -847,6 +894,10 @@ shared_ptr<Relation> SubstraitToDuckDB::TransformRootOp(const substrait::RelRoot
 			return child;
 		}
 	}
+	case substrait::Rel::RelTypeCase::kUpdate:
+		return child;
+	}
+
 
 	return make_shared_ptr<ProjectionRelation>(child, std::move(expressions), aliases);
 }

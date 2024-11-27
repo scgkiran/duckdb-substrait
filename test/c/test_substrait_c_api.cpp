@@ -320,3 +320,46 @@ TEST_CASE("Test C VirtualTable input Expression", "[substrait-api]") {
   REQUIRE(CHECK_COLUMN(result, 0, {2, 6}));
   REQUIRE(CHECK_COLUMN(result, 1, {4, 8}));
 }
+
+
+TEST_CASE("Test C UpdateRows with Substrait API", "[substrait-api]") {
+	DuckDB db(nullptr);
+	Connection con(db);
+
+	CreateEmployeeTable(con);
+
+	ExecuteViaSubstraitJSON(con, "UPDATE employees SET salary = salary * 1.20");
+	auto result = ExecuteViaSubstrait(con, "SELECT * from employees");
+	REQUIRE(CHECK_COLUMN(result, 0, {1, 2, 3, 4, 5}));
+	REQUIRE(CHECK_COLUMN(result, 1, {"John Doe", "Jane Smith", "Alice Johnson", "Bob Brown", "Charlie Black"}));
+	REQUIRE(CHECK_COLUMN(result, 2, {1, 2, 1, 3, 2}));
+	REQUIRE(CHECK_COLUMN(result, 3, {144000, 96000, 60000, 114000, 72000}));
+}
+
+TEST_CASE("Test C UpdateRows with simple condition using Substrait API", "[substrait-api]") {
+	DuckDB db(nullptr);
+	Connection con(db);
+
+	CreateEmployeeTable(con);
+
+	ExecuteViaSubstraitJSON(con, "UPDATE employees SET salary = salary * 1.20 where employee_id = 1");
+	auto result = ExecuteViaSubstrait(con, "SELECT * from employees");
+	REQUIRE(CHECK_COLUMN(result, 0, {1, 2, 3, 4, 5}));
+	REQUIRE(CHECK_COLUMN(result, 1, {"John Doe", "Jane Smith", "Alice Johnson", "Bob Brown", "Charlie Black"}));
+	REQUIRE(CHECK_COLUMN(result, 2, {1, 2, 1, 3, 2}));
+	REQUIRE(CHECK_COLUMN(result, 3, {144000, 80000, 50000, 95000, 60000}));
+}
+
+TEST_CASE("Test C UpdateRows with condition on a column using Substrait API", "[substrait-api]") {
+	DuckDB db(nullptr);
+	Connection con(db);
+
+	CreateEmployeeTable(con);
+
+	ExecuteViaSubstraitJSON(con, "UPDATE employees SET salary = salary * 1.20 where salary < 100000");
+	auto result = ExecuteViaSubstrait(con, "SELECT * from employees");
+	REQUIRE(CHECK_COLUMN(result, 0, {1, 2, 3, 4, 5}));
+	REQUIRE(CHECK_COLUMN(result, 1, {"John Doe", "Jane Smith", "Alice Johnson", "Bob Brown", "Charlie Black"}));
+	REQUIRE(CHECK_COLUMN(result, 2, {1, 2, 1, 3, 2}));
+	REQUIRE(CHECK_COLUMN(result, 3, {120000, 96000, 60000, 114000, 72000}));
+}
