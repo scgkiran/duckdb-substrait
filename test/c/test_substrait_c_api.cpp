@@ -320,3 +320,65 @@ TEST_CASE("Test C VirtualTable input Expression", "[substrait-api]") {
   REQUIRE(CHECK_COLUMN(result, 0, {2, 6}));
   REQUIRE(CHECK_COLUMN(result, 1, {4, 8}));
 }
+
+
+TEST_CASE("Test C Simple select true", "[substrait-api]") {
+	DuckDB db(nullptr);
+	Connection con(db);
+
+	auto json = R"({
+    "version": {
+        "minorNumber": 29,
+        "producer": "substrait-go"
+    },
+    "relations": [
+        {
+            "root": {
+                "input": {
+                    "read": {
+                        "common": {
+                            "direct": {}
+                        },
+                        "baseSchema": {
+                            "names": [
+                                "C1"
+                            ],
+                            "struct": {
+                                "types": [
+                                    {
+                                        "bool": {
+                                            "nullability": "NULLABILITY_NULLABLE"
+                                        }
+                                    }
+                                ],
+                                "nullability": "NULLABILITY_REQUIRED"
+                            }
+                        },
+                        "virtualTable": {
+                            "expressions": [
+                                {
+                                    "fields": [
+                                        {
+                                            "literal": {
+                                                "boolean": true,
+                                                "nullable": true
+                                            }
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                },
+                "names": [
+                    "C1"
+                ]
+            }
+        }
+    ]
+})";
+
+
+	auto result = con.FromSubstraitJSON(json);
+	REQUIRE(CHECK_COLUMN(result, 0, {true}));
+}
