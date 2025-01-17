@@ -1633,7 +1633,7 @@ substrait::Rel *DuckDBToSubstrait::TransformDeleteTable(LogicalOperator &dop) {
 	return rel;
 }
 
-vector<LogicalType>::__alloc_traits::size_type DuckDBToSubstrait::GetColumnCount(LogicalOperator &dop) {
+vector<LogicalType>::size_type DuckDBToSubstrait::GetColumnCount(LogicalOperator &dop) {
 	return dop.types.size();
 }
 
