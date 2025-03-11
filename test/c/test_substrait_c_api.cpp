@@ -660,11 +660,55 @@ TEST_CASE("Test C VirtualTable with bad input Literal", "[substrait-api]") {
 	REQUIRE_THROWS(FromSubstraitJSON(con,json_plan));
 }
 
-TEST_CASE("Test C Project with VirtualTable", "[substrait-api]") {
+TEST_CASE("Test C Project with VirtualTable1", "[substrait-api]") {
 	DuckDB db(nullptr);
 	Connection con(db);
 
 	auto json_plan = R"({"version":{"minorNumber":29, "producer":"substrait-go darwin/arm64"}, "relations":[{"root":{"input":{"project":{"common":{"emit":{"outputMapping":[2]}}, "input":{"read":{"common":{"direct":{}}, "baseSchema":{"names":["c1", "c2"], "struct":{"types":[{"fp64":{"nullability":"NULLABILITY_NULLABLE"}}, {"fp64":{"nullability":"NULLABILITY_NULLABLE"}}], "nullability":"NULLABILITY_REQUIRED"}}, "virtualTable":{"expressions":[{"fields":[{"literal":{"fp64":1, "nullable":true}}, {"literal":{"fp64":2, "nullable":true}}]}]}}}, "expressions":[{"literal":{"fp64":42}}]}}, "names":["p1"]}}]})";
 	auto result = FromSubstraitJSON(con,json_plan);
 	REQUIRE(CHECK_COLUMN(result, 0, {42}));
+}
+
+TEST_CASE("Test C Project with VirtualTable2 Literal", "[substrait-api]") {
+	DuckDB db(nullptr);
+	Connection con(db);
+
+	auto json_plan = R"({"version":{"minorNumber":29, "producer":"substrait-go darwin/arm64"}, "extensionUris":[{"extensionUriAnchor":1, "uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic.yaml"}, {"extensionUriAnchor":2, "uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic_decimal.yaml"}, {"extensionUriAnchor":3, "uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_comparison.yaml"}], "extensions":[{"extensionFunction":{"extensionUriReference":1, "functionAnchor":1, "name":"add:i32_i32"}}, {"extensionFunction":{"extensionUriReference":2, "functionAnchor":2, "name":"add:dec_dec"}}, {"extensionFunction":{"extensionUriReference":3, "functionAnchor":3, "name":"lte:any_any"}}], "relations":[{"root":{"input":{"project":{"common":{"emit":{"outputMapping":[2]}}, "input":{"read":{"common":{"direct":{}}, "baseSchema":{"names":["c1", "c2"], "struct":{"types":[{"fp64":{"nullability":"NULLABILITY_NULLABLE"}}, {"fp64":{"nullability":"NULLABILITY_NULLABLE"}}], "nullability":"NULLABILITY_REQUIRED"}}, "virtualTable":{"expressions":[{"fields":[{"literal":{"fp64":1, "nullable":true}}, {"literal":{"fp64":2, "nullable":true}}]}]}}}, "expressions":[{"literal":{"fp64":42}}]}}, "names":["p1"]}}]})";
+	auto result = FromSubstraitJSON(con,json_plan);
+	REQUIRE(CHECK_COLUMN(result, 0, {42}));
+}
+
+TEST_CASE("Test C Project with VirtualTable3 FieldReference", "[substrait-api]") {
+	DuckDB db(nullptr);
+	Connection con(db);
+
+	auto json_plan = R"({"version":{"minorNumber":29, "producer":"substrait-go darwin/arm64"}, "extensionUris":[{"extensionUriAnchor":1, "uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic.yaml"}, {"extensionUriAnchor":2, "uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic_decimal.yaml"}, {"extensionUriAnchor":3, "uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_comparison.yaml"}], "extensions":[{"extensionFunction":{"extensionUriReference":1, "functionAnchor":1, "name":"add:i32_i32"}}, {"extensionFunction":{"extensionUriReference":2, "functionAnchor":2, "name":"add:dec_dec"}}, {"extensionFunction":{"extensionUriReference":3, "functionAnchor":3, "name":"lte:any_any"}}], "relations":[{"root":{"input":{"project":{"common":{"emit":{"outputMapping":[2]}}, "input":{"read":{"common":{"direct":{}}, "baseSchema":{"names":["c1", "c2"], "struct":{"types":[{"fp64":{"nullability":"NULLABILITY_NULLABLE"}}, {"fp64":{"nullability":"NULLABILITY_NULLABLE"}}], "nullability":"NULLABILITY_REQUIRED"}}, "virtualTable":{"expressions":[{"fields":[{"literal":{"fp64":1, "nullable":true}}, {"literal":{"fp64":2, "nullable":true}}]}]}}}, "expressions":[{"selection":{"directReference":{"structField":{}}, "rootReference":{}}}]}}, "names":["p1"]}}]})";
+	auto result = FromSubstraitJSON(con,json_plan);
+	REQUIRE(CHECK_COLUMN(result, 0, {1}));
+}
+
+TEST_CASE("Test C Project with VirtualTable4 Cast", "[substrait-api]") {
+	DuckDB db(nullptr);
+	Connection con(db);
+
+	auto json_plan = R"({"version":{"minorNumber":29,"producer":"substrait-go darwin/arm64"},"extensionUris":[{"extensionUriAnchor":1,"uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic.yaml"},{"extensionUriAnchor":2,"uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic_decimal.yaml"},{"extensionUriAnchor":3,"uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_comparison.yaml"}],"extensions":[{"extensionFunction":{"extensionUriReference":1,"functionAnchor":1,"name":"add:i32_i32"}},{"extensionFunction":{"extensionUriReference":2,"functionAnchor":2,"name":"add:dec_dec"}},{"extensionFunction":{"extensionUriReference":3,"functionAnchor":3,"name":"lte:any_any"}}],"relations":[{"root":{"input":{"project":{"common":{"emit":{"outputMapping":[2]}},"input":{"read":{"common":{"direct":{}},"baseSchema":{"names":["c1","c2"],"struct":{"types":[{"fp64":{"nullability":"NULLABILITY_NULLABLE"}},{"fp64":{"nullability":"NULLABILITY_NULLABLE"}}],"nullability":"NULLABILITY_REQUIRED"}},"virtualTable":{"expressions":[{"fields":[{"literal":{"fp64":1,"nullable":true}},{"literal":{"fp64":2,"nullable":true}}]}]}}},"expressions":[{"cast":{"type":{"fp64":{"nullability":"NULLABILITY_REQUIRED"}},"input":{"literal":{"fp64":12,"nullable":true}},"failureBehavior":"FAILURE_BEHAVIOR_THROW_EXCEPTION"}}]}},"names":["p1"]}}]})";
+	auto result = FromSubstraitJSON(con,json_plan);
+	REQUIRE(CHECK_COLUMN(result, 0, {12}));
+}
+
+TEST_CASE("Test C Project with VirtualTable5 CastFailureWithException", "[substrait-api]") {
+	DuckDB db(nullptr);
+	Connection con(db);
+
+	auto json_plan = R"({"version":{"minorNumber":29,"producer":"substrait-go darwin/arm64"},"extensionUris":[{"extensionUriAnchor":1,"uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic.yaml"},{"extensionUriAnchor":2,"uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic_decimal.yaml"},{"extensionUriAnchor":3,"uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_comparison.yaml"}],"extensions":[{"extensionFunction":{"extensionUriReference":1,"functionAnchor":1,"name":"add:i32_i32"}},{"extensionFunction":{"extensionUriReference":2,"functionAnchor":2,"name":"add:dec_dec"}},{"extensionFunction":{"extensionUriReference":3,"functionAnchor":3,"name":"lte:any_any"}}],"relations":[{"root":{"input":{"project":{"common":{"emit":{"outputMapping":[2]}},"input":{"read":{"common":{"direct":{}},"baseSchema":{"names":["c1","c2"],"struct":{"types":[{"fp64":{"nullability":"NULLABILITY_NULLABLE"}},{"fp64":{"nullability":"NULLABILITY_NULLABLE"}}],"nullability":"NULLABILITY_REQUIRED"}},"virtualTable":{"expressions":[{"fields":[{"literal":{"fp64":1,"nullable":true}},{"literal":{"fp64":2,"nullable":true}}]}]}}},"expressions":[{"cast":{"type":{"fp64":{"nullability":"NULLABILITY_REQUIRED"}},"input":{"literal":{"varChar":{"value":"five","length":4}}},"failureBehavior":"FAILURE_BEHAVIOR_THROW_EXCEPTION"}}]}},"names":["p1"]}}]})";
+	REQUIRE_FAIL(FromSubstraitJSON(con,json_plan));
+}
+
+TEST_CASE("Test C Project with VirtualTable6 Sin Func", "[substrait-api]") {
+	DuckDB db(nullptr);
+	Connection con(db);
+
+	auto json_plan = R"({"version":{"minorNumber":29,"producer":"substrait-go darwin/arm64"},"extensionUris":[{"extensionUriAnchor":1,"uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic.yaml"},{"extensionUriAnchor":2,"uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic_decimal.yaml"},{"extensionUriAnchor":3,"uri":"https://github.com/substrait-io/substrait/blob/main/extensions/functions_comparison.yaml"}],"extensions":[{"extensionFunction":{"extensionUriReference":1,"functionAnchor":1,"name":"add:i32_i32"}},{"extensionFunction":{"extensionUriReference":2,"functionAnchor":2,"name":"add:dec_dec"}},{"extensionFunction":{"extensionUriReference":1,"functionAnchor":3,"name":"sin:fp64"}},{"extensionFunction":{"extensionUriReference":3,"functionAnchor":4,"name":"lte:any_any"}}],"relations":[{"root":{"input":{"project":{"common":{"emit":{"outputMapping":[2]}},"input":{"read":{"common":{"direct":{}},"baseSchema":{"names":["c1","c2"],"struct":{"types":[{"fp64":{"nullability":"NULLABILITY_NULLABLE"}},{"fp64":{"nullability":"NULLABILITY_NULLABLE"}}],"nullability":"NULLABILITY_REQUIRED"}},"virtualTable":{"expressions":[{"fields":[{"literal":{"fp64":1,"nullable":true}},{"literal":{"fp64":2,"nullable":true}}]}]}}},"expressions":[{"scalarFunction":{"functionReference":3,"arguments":[{"value":{"literal":{"fp64":2.2}}}],"outputType":{"fp64":{"nullability":"NULLABILITY_REQUIRED"}}}}]}},"names":["p1"]}}]})";
+	auto result = FromSubstraitJSON(con,json_plan);
+	REQUIRE(CHECK_COLUMN(result, 0, {0.8084964038195901}));
 }
